@@ -21,19 +21,49 @@ if not os.path.exists(tshark_path):
 
 # Define the fields to extract, matching the notebook
 fields = [
+    'frame.number',
     'frame.time',
+    'frame.time_epoch',
+    'frame.time_delta',
+    'frame.time_delta_displayed',
+    'eth.src',
+    'eth.dst',
     'ip.src',
     'ip.dst',
+    'ip.proto',
+    'ip.ttl',
     '_ws.col.Protocol',
     'tcp.srcport',
     'tcp.dstport',
+    'tcp.stream',
+    'tcp.seq',
+    'tcp.ack',
+    'tcp.window_size_value',
+    'tcp.len',
+    'tcp.flags',
+    'tcp.flags.syn',
+    'tcp.flags.ack',
+    'tcp.flags.fin',
+    'tcp.flags.reset',
+    'tcp.flags.push',
+    'tcp.flags.urg',
     'udp.srcport',
     'udp.dstport',
+    'udp.length',
+    'data.len',
     'frame.len'
 ]
 
 # Build the -e arguments for tshark
 tshark_fields_args = [arg for field in fields for arg in ['-e', field]]
+
+
+def get_device_label(pcap_file_path):
+    relative_path = os.path.relpath(pcap_file_path, pcap_root_dir)
+    path_parts = relative_path.split(os.sep)
+    if len(path_parts) > 1:
+        return path_parts[0]
+    return os.path.splitext(os.path.basename(pcap_file_path))[0]
 
 # Find all pcap files
 pcap_files = []
@@ -49,37 +79,35 @@ if not pcap_files:
 
 print(f"Found {len(pcap_files)} pcap files. Starting processing...")
 
-# Process the first file to create the CSV with a header
+# Process all files and write a single CSV with device labels
 try:
-    first_file = pcap_files.pop(0)
-    print(f"Processing (1/{len(pcap_files) + 1}): {first_file}")
-    command = [
-        tshark_path,
-        '-r', first_file,
-        '-T', 'fields'
-    ] + tshark_fields_args + [
-        '-E', 'header=y',
-        '-E', 'separator=,',
-        '-E', 'quote=d'  # Force quoting of all fields
-    ]
-    
     with open(output_csv, 'w') as f_out:
-        subprocess.run(command, stdout=f_out, check=True, stderr=subprocess.PIPE)
+        header_row = ['"device_label"'] + [f'"{field}"' for field in fields]
+        f_out.write(','.join(header_row) + '\n')
 
-    # Process the remaining files and append to the CSV without a header
-    for i, pcap_file in enumerate(pcap_files):
-        print(f"Processing ({i + 2}/{len(pcap_files) + 1}): {pcap_file}")
-        command = [
-            tshark_path,
-            '-r', pcap_file,
-            '-T', 'fields'
-        ] + tshark_fields_args + [
-            '-E', 'header=n',
-            '-E', 'separator=,',
-            '-E', 'quote=d'  # Force quoting of all fields
-        ]
-        with open(output_csv, 'a') as f_out:
-            subprocess.run(command, stdout=f_out, check=True, stderr=subprocess.PIPE)
+        for i, pcap_file in enumerate(pcap_files):
+            print(f"Processing ({i + 1}/{len(pcap_files)}): {pcap_file}")
+            device_label = get_device_label(pcap_file)
+            command = [
+                tshark_path,
+                '-r', pcap_file,
+                '-T', 'fields'
+            ] + tshark_fields_args + [
+                '-E', 'header=n',
+                '-E', 'separator=,',
+                '-E', 'quote=d'
+            ]
+
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+
+            for row in result.stdout.splitlines():
+                if row.strip():
+                    f_out.write(f'"{device_label}",{row}\n')
 
     print("\nProcessing complete!")
     print(f"All data has been extracted and saved to '{output_csv}'.")
@@ -87,6 +115,6 @@ try:
 except subprocess.CalledProcessError as e:
     print("\nAn error occurred while running tshark.")
     print(f"Command: {' '.join(e.cmd)}")
-    print(f"Error message: {e.stderr.decode('utf-8')}")
+    print(f"Error message: {e.stderr}")
 except Exception as e:
     print(f"\nAn unexpected error occurred: {e}")
